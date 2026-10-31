@@ -1,6 +1,6 @@
 {
   "name": "dafenyu-memory",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "大肥鱼记忆引擎 · Fish Memory Engine：AI QQ 机器人的跨会话长期记忆层（零依赖，owner 隔离，五路检索，大脑可视化）",
   "type": "module",
   "main": "server.mjs",

@@ -23,9 +23,11 @@ import { fileURLToPath } from 'node:url';
 import * as store from './lib/store.mjs';
 import { recall, blockOf, nightly } from './lib/engine.mjs';
 import { extractWithLLM, fallback, normalize } from './lib/extract.mjs';
+import { buildAtlas, exportData, validateImport, retentionAt } from './lib/viewmodel.mjs';
+import { makeEmbedder } from './lib/embed.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const VERSION = '1.0.0';
+const VERSION = '2.0.0';
 const STARTED = Date.now();
 
 /* ---------------- 配置 ---------------- */
@@ -46,6 +48,10 @@ function loadConfig() {
       baseUrl: env.MEMORY_UPSTREAM_BASE || fileCfg.upstream?.baseUrl || '',
       apiKey: env.MEMORY_UPSTREAM_KEY || fileCfg.upstream?.apiKey || '',
       model: env.MEMORY_UPSTREAM_MODEL || fileCfg.upstream?.model || 'deepseek-chat',
+    },
+    embed: {
+      baseUrl: env.MEMORY_EMBED_URL || fileCfg.embed?.baseUrl || '',
+      model: env.MEMORY_EMBED_MODEL || fileCfg.embed?.model || 'bge-m3',
     },
     recall: Object.assign({ k: 5, minScore: 0.35, maxBytes: 1400, maxItems: 5 }, fileCfg.recall || {}),
     remember: Object.assign({ enabled: true, minChars: 6, importance: 0.4 }, fileCfg.remember || {}),
@@ -107,6 +113,11 @@ async function rememberConversation(text, { owner, user, channel, group, source 
   }
   const rec = extracted || fallback([{ who: user || '用户', text: body }]);
 
+  // 可选语义向量：配了 Ollama 才算，失败不阻断记忆（语义路退回 0）
+  let vector;
+  const embedder = makeEmbedder(CFG.embed);
+  if (embedder) { try { vector = await embedder(rec.summary || body); } catch { vector = undefined; } }
+
   return store.insertMemory({
     text: rec.summary || body.slice(0, 800),
     kind: rec.kind,
@@ -117,6 +128,7 @@ async function rememberConversation(text, { owner, user, channel, group, source 
     owner: ownerFor({ channel, user, group }),
     visibility: channel === 'group' ? 'group' : 'private',
     source,
+    vector,
   });
 }
 
@@ -223,8 +235,12 @@ const server = http.createServer(async (req, res) => {
   const auth = () => !CFG.token || (req.headers.authorization === 'Bearer ' + CFG.token);
 
   try {
-    /* 面板（静态） */
+    /* 面板（静态）：/panel 现在是 v2 多星图面板，旧版保留在 /panel-legacy */
     if (req.method === 'GET' && (p === '/' || p === '/panel')) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(fs.readFileSync(path.join(HERE, 'public', 'panel-v2.html')));
+    }
+    if (req.method === 'GET' && p === '/panel-legacy') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(fs.readFileSync(path.join(HERE, 'public', 'panel.html')));
     }
@@ -246,6 +262,41 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && p === '/stats') return ok(res, store.stats());
 
+    /* v2 星图载荷：瘦节点 + 聚合，完整原文不进星图载荷 */
+    if (req.method === 'GET' && p === '/atlas') {
+      const q = url.searchParams;
+      return ok(res, buildAtlas(store.load(), {
+        kind: q.get('kind') || '',
+        days: Number(q.get('days')) || 0,
+        includeArchived: q.get('archived') === '1',
+        includeSuperseded: q.get('superseded') === '1',
+        limit: Math.min(1000, Math.max(50, Number(q.get('limit')) || 500)),
+      }));
+    }
+    /* 模拟衰减预览：纯计算，绝不写库 */
+    if (req.method === 'GET' && p === '/simulate-decay') {
+      const daysAhead = Number(url.searchParams.get('days')) || 30;
+      const mems = store.load().memories.filter((m) => m.status === 'active');
+      return ok(res, {
+        daysAhead,
+        preview: mems.slice(0, 200).map((m) => ({ id: m.id, retention: retentionAt(m, daysAhead) })),
+      });
+    }
+    /* 单条详情：点节点时才取完整原文 */
+    if (req.method === 'GET' && p.startsWith('/memory/')) {
+      const mem = store.getMemory(p.slice('/memory/'.length));
+      if (!mem) return err(res, 404, '记忆不存在');
+      const { vector, ...rest } = mem;
+      return ok(res, rest);
+    }
+    if (req.method === 'GET' && p === '/export') return ok(res, exportData(store.load()));
+    if (req.method === 'POST' && p === '/import') {
+      const body = JSON.parse(await readBody(req) || '{}');
+      const v = validateImport(body);
+      if (!v.ok) return err(res, 400, v.error);
+      return ok(res, store.importMemories(v.data, { replace: body.replace === true }));
+    }
+
     if (req.method === 'POST' && p === '/remember') {
       const body = JSON.parse(await readBody(req) || '{}');
       const text = String(body.text || '').trim();
@@ -261,13 +312,20 @@ const server = http.createServer(async (req, res) => {
         owner: body.owner || ownerFor({ channel, user: body.user, group: body.group }),
         visibility: body.visibility || (channel === 'group' ? 'group' : 'private'),
         source: body.source || 'manual',
+        vector: Array.isArray(body.vector) ? body.vector : undefined,
       });
-      return ok(res, { id: mem.id, text: mem.text, kind: mem.kind, owner: mem.owner });
+      // 冲突标记：新事实取代旧事实时，旧的只标记 superseded，不删除
+      let superseded = null;
+      if (body.supersedes) {
+        superseded = store.supersede(String(body.supersedes), mem.id, body.superseded_reason || '');
+      }
+      return ok(res, { id: mem.id, text: mem.text, kind: mem.kind, owner: mem.owner, superseded: superseded?.id || null });
     }
 
     if (req.method === 'POST' && p === '/recall') {
       const body = JSON.parse(await readBody(req) || '{}');
       const channel = body.channel === 'group' || (!body.user && body.group) ? 'group' : 'private';
+      const embedder = body.embed === false ? null : makeEmbedder(CFG.embed);
       const hits = await recall(String(body.query || ''), {
         owner: body.user || '',
         group: body.group || '',
@@ -276,6 +334,7 @@ const server = http.createServer(async (req, res) => {
         minScore: Number.isFinite(Number(body.minScore)) ? Number(body.minScore) : CFG.recall.minScore,
         explain: body.explain === true,
         moodValence: body.mood_valence,
+        embed: embedder,
       });
       return ok(res, { hits, block: blockOf(hits) });
     }
@@ -322,6 +381,8 @@ server.listen(CFG.port, CFG.host, () => {
   log(`  面板     : http://${CFG.host}:${CFG.port}/panel`);
   log(`  代理端点 : ${CFG.upstream.baseUrl ? CFG.upstream.baseUrl : '(未配置 upstream，/v1 不可用)'}`);
   log(`  LLM 抽取 : ${CFG.llm.apiKey ? '已配置' : '未配置（用规则兜底）'}`);
+  log(`  Embedding: ${CFG.embed.baseUrl ? CFG.embed.baseUrl + ' / ' + CFG.embed.model : '未配置（语义路为 0）'}`);
+  log(`  星图面板 : http://${CFG.host}:${CFG.port}/panel  ·  旧版 /panel-legacy  ·  数据 /atlas`);
   log(`  鉴权     : ${CFG.token ? '已开启' : '未开启（仅本机使用）'}`);
   store.flush();
 });

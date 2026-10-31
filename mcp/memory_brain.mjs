@@ -68,6 +68,7 @@ export default {
         properties: {
           query: { type: 'string', description: '检索词或整句话' },
           k: { type: 'number', description: '返回几条，默认 5' },
+          explain: { type: 'boolean', description: '是否返回五路分数明细' },
           group_id: { type: 'number', description: '群号（群聊时传）' },
           user_id: { type: 'number', description: '当前说话人 QQ 号' },
         },
@@ -80,11 +81,12 @@ export default {
           query: str(a.query),
           k: Math.min(Math.max(Math.trunc(num(a.k) || num(c.k) || 5), 1), 12),
           minScore: Number.isFinite(Number(c.minScore)) ? Number(c.minScore) : 0.35,
+          explain: a.explain === true,
           user: id.user, group: id.group, channel: id.channel,
         });
         if (!data.hits.length) return `没找到和「${str(a.query)}」相关的记忆。`;
         return '🧠 我想起来了：\n' + data.hits
-          .map((h, i) => `${i + 1}. ${h.text}　（${h.kind}，${h.score}）`)
+          .map((h, i) => `${i + 1}. ${h.text}　（${h.kind}，${h.score}${h.why ? `，关键词 ${h.why.keyword} / 语义 ${h.why.semantic} / 重要性 ${h.why.importance} / 新鲜度 ${h.why.recency} / 图谱 ${h.why.graph}` : ''}）`)
           .join('\n');
       },
     },

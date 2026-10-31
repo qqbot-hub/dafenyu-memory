@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大肥鱼记忆星图 · Atlas v2</title>
+<style>
+:root{--bg:#04060c;--panel:rgba(13,18,30,.88);--line:rgba(255,255,255,.09);--text:#e8eef8;--dim:#7d8ca6;--acc:#5b8cff}
+*{box-sizing:border-box} body{margin:0;background:radial-gradient(1200px 700px at 70% -10%,#0d1b33 0%,#04060c 55%);color:var(--text);font:13px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+header{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,rgba(4,6,12,.96),rgba(4,6,12,.75));backdrop-filter:blur(10px);padding:12px 18px;border-bottom:1px solid var(--line)}
+.brand{font-size:16px;font-weight:800;letter-spacing:.3px}.brand small{color:var(--dim);font-weight:400;font-size:11px}
+.kpis{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.kpi{padding:5px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel);font-size:12px}.kpi b{color:var(--acc)}
+main{display:grid;grid-template-columns:1fr 320px;gap:14px;padding:14px 18px 24px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.tab{cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:999px;padding:7px 14px;font:inherit}.tab.on{border-color:var(--acc);background:rgba(91,140,255,.18)}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:12px}
+.filters input,.filters select{background:#0a1220;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit}
+.filters label{color:var(--dim);font-size:12px}
+.view{display:none;background:rgba(8,12,22,.72);border:1px solid var(--line);border-radius:16px;padding:12px}.view.on{display:block}
+.view h2{margin:0 0 6px;font-size:14px}.view p.note{margin:0 0 10px;color:var(--dim);font-size:12px}
+canvas{width:100%;height:560px;display:block;background:radial-gradient(800px 400px at 50% 40%,rgba(40,70,140,.18),transparent 70%);border-radius:12px}
+button{cursor:pointer;font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:7px 13px} button:hover{border-color:var(--acc)}
+.side{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;height:fit-content;position:sticky;top:110px}
+.side h3{margin:0 0 8px;font-size:13px;color:var(--dim);letter-spacing:1px}
+.card{border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin-bottom:8px;background:rgba(255,255,255,.03);font-size:12px}.card .meta{color:var(--dim);font-size:11px}
+.legend{display:flex;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--dim)}.legend i{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:3px}
+.rank{font-size:12px}.rank div{padding:5px 0;border-bottom:1px solid var(--line)}
+@media(max-width:900px){main{grid-template-columns:1fr}.side{position:static}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">✦ 大肥鱼记忆星图 <small>MEMORY ATLAS · LIVE · v2 · 一个过滤集合，五种投影</small></div>
+  <div class="kpis" id="kpis"></div>
+</header>
+<main>
+  <section>
+    <div class="tabs" id="tabs">
+      <button class="tab on" data-v="galaxy">🌌 总览星海</button>
+      <button class="tab" data-v="timeline">📉 时间与遗忘</button>
+      <button class="tab" data-v="core">🎯 人格核心环</button>
+      <button class="tab" data-v="entity">🕸️ 实体子图</button>
+      <button class="tab" data-v="heat">🔥 唤起热力</button>
+    </div>
+    <div class="filters">
+      <input id="q" placeholder="搜索标签 / 实体…" size="22">
+      <select id="kind"><option value="">全部类型</option><option>episode</option><option>fact</option><option>preference</option><option>relation</option><option>skill</option><option>digest</option></select>
+      <select id="days"><option value="0">全部时间</option><option value="7">近 7 天</option><option value="30">近 30 天</option><option value="90">近 90 天</option></select>
+      <label><input type="checkbox" id="showFading" checked> 显示正在变淡</label>
+      <label><input type="checkbox" id="showArchived"> 显示已归档</label>
+      <label>模拟衰减预览 <input type="range" id="decay" min="0" max="365" step="30" value="0"> <span id="decayLabel">现在</span></label>
+      <button onclick="reload()">↻ 刷新</button>
+      <button onclick="runNightly()">🌙 夜巡（真实）</button>
+    </div>
+
+    <div class="view on" id="v-galaxy"><h2>总览星海</h2><p class="note">金色 = 人格核心 / 钉住，青蓝 = 选中长期记忆，灰蓝 = 普通记录，灰紫虚环 = 正在变淡。亮度 = 留存度；被想起会重新变亮。拖拽平移，滚轮缩放，点节点看详情。</p><canvas id="cvGalaxy"></canvas></div>
+    <div class="view" id="v-timeline"><h2>时间与遗忘</h2><p class="note">横轴是创建时间，纵轴是留存度。滑块只是模拟未来衰减的预览，绝不写回记忆库；点一个节点可看它随时间的衰减曲线。</p><canvas id="cvTimeline"></canvas></div>
+    <div class="view" id="v-core"><h2>人格核心环</h2><p class="note">中心是钉住与元记忆，往外依次是选中长期、普通记录、最外圈是正在变淡的记忆。这个视图故意不用乱飘的力导向，让人格结构一眼稳定。</p><canvas id="cvCore"></canvas></div>
+    <div class="view" id="v-entity"><h2>实体子图</h2><p class="note">先在星海里点一个记忆或实体，这里只画它 1 跳内的邻居，关联才读得清。星海太密时不要硬看全图，看子图。</p><canvas id="cvEntity"></canvas></div>
+    <div class="view" id="v-heat"><h2>唤起热力</h2><p class="note">热力格按创建日与上次被想起日近似统计，因为底层目前不记逐日召回日志，这里不伪造逐日召回历史。下方的最常被想起榜是真实 hits 排序。</p><canvas id="cvHeat"></canvas><div class="rank" id="rank"></div></div>
+  </section>
+  <aside class="side">
+    <h3>节点详情</h3>
+    <div id="detail"><div style="color:var(--dim);font-size:12px">点一个节点看看她记得什么</div></div>
+    <h3 style="margin-top:14px">图例 · 分类</h3>
+    <div class="legend"><span><i style="background:#ffd45e"></i>核心</span><span><i style="background:#5bd8ff"></i>选中长期</span><span><i style="background:#8fa8c8"></i>普通</span><span><i style="background:#9a8fc8"></i>变淡</span><span><i style="background:#666"></i>归档/被取代</span></div>
+    <h3 style="margin-top:14px">隐私提醒</h3>
+    <div style="color:var(--dim);font-size:12px">面板只应在本地打开。私聊记忆默认不进群视图；截图展示时请先用搜索与类型过滤，只留公开与核心内容。</div>
+  </aside>
+</main>
+<script>
+const CAT_COLOR={core:'#ffd45e',selected:'#5bd8ff',ordinary:'#8fa8c8',fading:'#9a8fc8',archived:'#666',superseded:'#666'};
+const KIND_NAME={episode:'事件',fact:'事实',preference:'偏好',relation:'关系',skill:'技能',digest:'元记忆',hypothesis:'猜想'};
+let atlas=null, view='galaxy', selected=null, selectedEntity=null;
+let scale=1, offX=0, offY=0, dragging=false, panStart=null, t=0;
+const $=id=>document.getElementById(id);
+
+function filtered(){
+  if(!atlas) return [];
+  const q=$('q').value.trim().toLowerCase(), kind=$('kind').value;
+  return atlas.nodes.filter(n=>{
+    if(n.type!=='memory') return false;
+    if(kind && n.kind!==kind) return false;
+    if(! $('showFading').checked && n.category==='fading') return false;
+    if(q && !(n.label.toLowerCase().includes(q) || (n.entities||[]).join(' ').toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+function retention(n){
+  const daysAhead=Number($('decay').value||0);
+  if(n.pin || n.kind==='digest') return 1;
+  // 面板端近似：用 atlas 返回的 retention 做基数，模拟只按半衰期再衰减一次（预览用，不写库）
+  if(!daysAhead) return n.retention;
+  return +(n.retention * Math.pow(0.5, daysAhead/14)).toFixed(4);
+}
+function setupCanvas(id){
+  const cv=$(id), dpr=Math.min(2, devicePixelRatio||1);
+  cv.width=cv.clientWidth*dpr; cv.height=560*dpr;
+  const ctx=cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); return [cv,ctx];
+}
+function glow(ctx,x,y,r,color,alpha){
+  const g=ctx.createRadialGradient(x,y,0,x,y,r*3.2);
+  g.addColorStop(0,color+Math.round(alpha*255).toString(16).padStart(2,'0'));
+  g.addColorStop(1,'rgba(0,0,0,0)'); ctx.fillStyle=g;
+  ctx.beginPath(); ctx.arc(x,y,r*3.2,0,7); ctx.fill();
+}
+function drawGalaxy(){
+  const [cv,ctx]=setupCanvas('cvGalaxy'); const W=cv.clientWidth,H=560;
+  ctx.clearRect(0,0,W,H); ctx.save(); ctx.translate(W/2+offX,H/2+offY); ctx.scale(scale,scale);
+  const nodes=filtered();
+  // 位置：按分类分环 + 稳定伪随机角，避免每次刷新全乱
+  const placed=nodes.map((n,i)=>{
+    const ring={core:60,selected:150,ordinary:240,fading:320,archived:380,superseded:380}[n.category]||240;
+    const ang=(i*2.39996323)%(Math.PI*2);
+    return {...n,x:Math.cos(ang)*ring*(0.75+((i*37)%20)/60),y:Math.sin(ang)*ring*(0.75+((i*53)%20)/60)};
+  });
+  const idMap=new Map(placed.map(n=>[n.id,n]));
+  const edges=(atlas.edges||[]).filter(e=>idMap.has(e.s)&&idMap.has(e.t)).slice(0,900);
+  ctx.lineWidth=.6;
+  for(const e of edges){const a=idMap.get(e.s),b=idMap.get(e.t); if(!a||!b) continue; ctx.strokeStyle='rgba(255,255,255,.10)'; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();}
+  for(const n of placed){
+    const r=n.category==='core'?9:n.category==='selected'?6.5:4.5, col=CAT_COLOR[n.category]||'#8fa8c8', ret=retention(n);
+    glow(ctx,n.x,n.y,r,col,0.25+ret*0.55);
+    ctx.beginPath(); ctx.arc(n.x,n.y,r,0,7); ctx.fillStyle=col; ctx.globalAlpha=.35+ret*.65; ctx.fill(); ctx.globalAlpha=1;
+    if(n.pin||n.category==='core'){ctx.strokeStyle='#ffd45e'; ctx.lineWidth=1.4; ctx.beginPath(); ctx.arc(n.x,n.y,r+3,0,7); ctx.stroke();}
+    if(selected?.id===n.id){ctx.strokeStyle='#fff'; ctx.beginPath(); ctx.arc(n.x,n.y,r+6,0,7); ctx.stroke();}
+    if(scale>1.4||n.category==='core'||selected?.id===n.id){ctx.fillStyle='rgba(232,238,248,.85)'; ctx.font='11px sans-serif'; ctx.textAlign='center'; ctx.fillText(n.label,n.x,n.y-r-7);}
+  }
+  ctx.restore();
+  cv._placed=placed;
+}
+function drawTimeline(){
+  const [cv,ctx]=setupCanvas('cvTimeline'); const W=cv.clientWidth,H=560; ctx.clearRect(0,0,W,H);
+  const nodes=filtered(); if(!nodes.length){ctx.fillStyle='#7d8ca6'; ctx.fillText('暂无记忆',20,30); return;}
+  const times=nodes.map(n=>n.created_at), min=Math.min(...times), max=Math.max(...times,Date.now());
+  ctx.strokeStyle='rgba(255,255,255,.15)'; ctx.beginPath(); ctx.moveTo(40,H-40); ctx.lineTo(W-20,H-40); ctx.moveTo(40,20); ctx.lineTo(40,H-40); ctx.stroke();
+  ctx.fillStyle='#7d8ca6'; ctx.font='11px sans-serif'; ctx.fillText('留存度 1.0',8,28); ctx.fillText('0',28,H-28);
+  for(const n of nodes){
+    const x=40+(max===min?W/2:(n.created_at-min)/(max-min)*(W-70)), y=H-40-retention(n)*(H-80), col=CAT_COLOR[n.category];
+    ctx.beginPath(); ctx.arc(x,y,3+n.hits*.4,0,7); ctx.fillStyle=col; ctx.globalAlpha=.5+retention(n)*.5; ctx.fill(); ctx.globalAlpha=1;
+    if(selected?.id===n.id){ctx.strokeStyle='#fff'; ctx.beginPath(); ctx.arc(x,y,9,0,7); ctx.stroke(); ctx.fillStyle='#fff'; ctx.fillText(n.label,x+12,y);}
+  }
+  if(selected){
+    const n=filtered().find(x=>x.id===selected.id);
+    if(n){ctx.strokeStyle='#ffd45e'; ctx.beginPath(); for(let d=0;d<=365;d+=30){const ret=n.pin?1:Math.max(0,n.retention*Math.pow(.5,d/14)); const x=40+(d/365)*(W-70), y=H-40-ret*(H-80); d?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke(); ctx.fillStyle='#ffd45e'; ctx.fillText('选中记忆的模拟衰减曲线（预览，不写库）',50,30);}
+  }
+}
+function drawCore(){
+  const [cv,ctx]=setupCanvas('cvCore'); const W=cv.clientWidth,H=560; ctx.clearRect(0,0,W,H);
+  const cx=W/2,cy=H/2, nodes=filtered();
+  const rings=[['core',70],['selected',150],['ordinary',230],['fading',300]];
+  ctx.strokeStyle='rgba(255,255,255,.12)';
+  for(const [,r] of rings){ctx.beginPath(); ctx.arc(cx,cy,r,0,7); ctx.stroke();}
+  rings.forEach(([cat,r])=>{
+    const arr=nodes.filter(n=>n.category===cat);
+    arr.forEach((n,i)=>{const ang=i/Math.max(1,arr.length)*Math.PI*2; const x=cx+Math.cos(ang)*r, y=cy+Math.sin(ang)*r; const col=CAT_COLOR[cat]; glow(ctx,x,y,6,col,.5); ctx.beginPath(); ctx.arc(x,y,cat==='core'?8:5,0,7); ctx.fillStyle=col; ctx.fill(); if(i<8){ctx.fillStyle='rgba(232,238,248,.8)'; ctx.font='11px sans-serif'; ctx.textAlign='center'; ctx.fillText(n.label,x,y-12);}});
+  });
+}
+function drawEntity(){
+  const [cv,ctx]=setupCanvas('cvEntity'); const W=cv.clientWidth,H=560; ctx.clearRect(0,0,W,H);
+  if(!atlas){return;}
+  let center=null, neigh=[];
+  if(selectedEntity){center={label:selectedEntity}; neigh=filtered().filter(n=>(n.entities||[]).includes(selectedEntity)).slice(0,14);}
+  else if(selected){const n=filtered().find(x=>x.id===selected.id); if(n){center=n; neigh=filtered().filter(x=>x.id!==n.id && x.entities.some(e=>n.entities.includes(e))).slice(0,14);}}
+  else {const top=(atlas.nodes||[]).filter(n=>n.type==='entity').sort((a,b)=>b.weight-a.weight)[0]; if(top){center={label:top.label}; neigh=filtered().filter(n=>(n.entities||[]).includes(top.label)).slice(0,14);}}
+  if(!center){ctx.fillStyle='#7d8ca6'; ctx.fillText('先在星海里点一个记忆或实体',20,30); return;}
+  const cx=W/2,cy=H/2; ctx.fillStyle='#fff'; ctx.font='14px sans-serif'; ctx.textAlign='center'; ctx.fillText(center.label,cx,cy);
+  ctx.beginPath(); ctx.arc(cx,cy,12,0,7); ctx.fillStyle='#ffd45e'; ctx.fill();
+  neigh.forEach((n,i)=>{const ang=i/Math.max(1,neigh.length)*Math.PI*2, x=cx+Math.cos(ang)*180, y=cy+Math.sin(ang)*180; ctx.strokeStyle='rgba(255,255,255,.2)'; ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(x,y); ctx.stroke(); ctx.beginPath(); ctx.arc(x,y,6,0,7); ctx.fillStyle=CAT_COLOR[n.category]; ctx.fill(); ctx.fillStyle='rgba(232,238,248,.85)'; ctx.font='11px sans-serif'; ctx.fillText(n.label,x,y-12);});
+}
+function drawHeat(){
+  const [cv,ctx]=setupCanvas('cvHeat'); const W=cv.clientWidth,H=560; ctx.clearRect(0,0,W,H);
+  const heat=atlas?.heat||[]; const cell=28, gap=6, maxV=Math.max(1,...heat.map(h=>h.created+h.recalled));
+  heat.forEach((h,i)=>{const col=Math.floor(i/7), row=i%7, x=20+col*(cell+gap), y=30+row*(cell+gap), v=(h.created+h.recalled)/maxV; ctx.fillStyle=`rgba(91,216,255,${.12+v*.75})`; ctx.fillRect(x,y,cell,cell); ctx.fillStyle='rgba(232,238,248,.7)'; ctx.font='10px sans-serif'; if(i%7===0) ctx.fillText(h.date.slice(5),x,y-4);});
+  ctx.fillStyle='#7d8ca6'; ctx.fillText('近 28 天：颜色越亮，当天创建 + 被想起的活动越多（近似统计）',20,260);
+  $('rank').innerHTML='<h3 style="margin:12px 0 6px">最常被想起</h3>'+(atlas?.mostRecalled||[]).map(m=>`<div>${m.label} · ${m.kind} · 被想起 ${m.hits} 次 · 留存 ${m.retention}</div>`).join('')||'<div>暂无</div>';
+}
+function drawAll(){ if(view==='galaxy')drawGalaxy(); if(view==='timeline')drawTimeline(); if(view==='core')drawCore(); if(view==='entity')drawEntity(); if(view==='heat')drawHeat(); }
+function renderKpis(){
+  if(!atlas) return;
+  const s=atlas.stats;
+  $('kpis').innerHTML=`<span class="kpi">记忆 <b>${s.total}</b></span><span class="kpi">核心 <b>${s.byCategory.core||0}</b></span><span class="kpi">选中长期 <b>${s.byCategory.selected||0}</b></span><span class="kpi">变淡 <b>${s.byCategory.fading||0}</b></span><span class="kpi">实体 <b>${s.entities}</b></span><span class="kpi">平均留存 <b>${s.avgRetention}</b></span>`;
+}
+async function reload(){
+  const days=$('days').value, archived=$('showArchived').checked?'1':'0';
+  const res=await fetch(`/atlas?days=${days}&archived=${archived}`);
+  const j=await res.json(); atlas=j.data; renderKpis(); drawAll();
+}
+function showDetail(n){
+  const box=$('detail');
+  if(!n){box.innerHTML='<div style="color:var(--dim)">点一个节点看看她记得什么</div>'; return;}
+  if(n.type==='entity'){selectedEntity=n.label; const linked=filtered().filter(x=>(x.entities||[]).includes(n.label)); box.innerHTML=`<div class="card"><b>🏷 ${n.label}</b><div class="meta">实体 · 被提及 ${n.weight} 次 · 关联记忆 ${linked.length} 条</div></div>`+linked.slice(0,10).map(x=>`<div class="card">${x.label}<div class="meta">${KIND_NAME[x.kind]||x.kind}</div></div>`).join(''); drawAll(); return;}
+  fetch('/memory/'+encodeURIComponent(n.memId)).then(r=>r.json()).then(j=>{
+    const m=j.data||{};
+    box.innerHTML=`<div class="card"><b>${KIND_NAME[m.kind]||m.kind}${m.pin?' · 📌':''}</b><br>${m.text||n.label}<div class="meta">归属 ${m.owner} · 场合 ${m.visibility} · 重要度 ${m.importance} · 被想起 ${m.hits} 次<br>创建 ${new Date(m.created_at).toLocaleString()} · 上次想起 ${new Date(m.last_hit||m.created_at).toLocaleString()}${m.status && m.status!=='active' ? ' · 状态 '+m.status : ''}</div></div>`;
+  });
+}
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on')); b.classList.add('on'); view=b.dataset.v; document.querySelectorAll('.view').forEach(v=>v.classList.remove('on')); $('v-'+view).classList.add('on'); drawAll();});
+['q','kind','days','showFading','showArchived'].forEach(id=>$(id).addEventListener('input',drawAll));
+$('decay').addEventListener('input',e=>{$('decayLabel').textContent=Number(e.target.value)?('+' + e.target.value + ' 天预览'):'现在'; drawAll();});
+$('cvGalaxy').addEventListener('wheel',e=>{e.preventDefault(); scale=Math.min(3,Math.max(.3,scale*(e.deltaY<0?1.1:.9))); drawAll();},{passive:false});
+$('cvGalaxy').addEventListener('pointerdown',e=>{dragging=true; panStart={x:e.clientX,y:e.clientY,ox:offX,oy:offY};});
+addEventListener('pointermove',e=>{if(!dragging) return; offX=panStart.ox+(e.clientX-panStart.x); offY=panStart.oy+(e.clientY-panStart.y); drawAll();});
+addEventListener('pointerup',()=>dragging=false);
+$('cvGalaxy').addEventListener('click',e=>{
+  const cv=$('cvGalaxy'), rect=cv.getBoundingClientRect(), W=cv.clientWidth;
+  const x=(e.clientX-rect.left-W/2-offX)/scale, y=(e.clientY-rect.top-280-offY)/scale;
+  const placed=cv._placed||[]; const n=placed.find(p=>(p.x-x)**2+(p.y-y)**2<=100);
+  if(n){selected=n; showDetail(n); drawAll();}
+});
+function runNightly(){fetch('/nightly',{method:'POST'}).then(r=>r.json()).then(j=>{alert(`夜巡完成：衰减 ${j.data.decayed} · 归档 ${j.data.archived} · 合并 ${j.data.merged} · 清除 ${j.data.purged}`); reload();});}
+document.addEventListener('visibilitychange',()=>{/* 面板隐藏时不再高频重绘，靠手动刷新与 30 秒定时 */});
+reload(); setInterval(reload,30000);
+(function loop(){ t++; if(!document.hidden && view==='galaxy') drawGalaxy(); requestAnimationFrame(loop); })();
+</script>
+</body>
+</html>
