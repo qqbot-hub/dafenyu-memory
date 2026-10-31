@@ -1,0 +1,17 @@
+{
+  "port": 8790,
+  "host": "127.0.0.1",
+  "token": "",
+  "llm": {
+    "baseUrl": "https://api.deepseek.com/v1",
+    "apiKey": "sk-在这里填你的Key",
+    "model": "deepseek-chat"
+  },
+  "upstream": {
+    "baseUrl": "https://api.deepseek.com/v1",
+    "apiKey": "sk-在这里填你的Key",
+    "model": "deepseek-chat"
+  },
+  "recall": { "k": 5, "minScore": 0.35, "maxBytes": 1400, "maxItems": 5 },
+  "remember": { "enabled": true, "minChars": 6, "importance": 0.4 }
+}

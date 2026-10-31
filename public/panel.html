@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大肥鱼大脑 · 运行中</title>
+<style>
+  :root {
+    --bg: #05070d; --panel: rgba(13,18,28,.88); --line: rgba(255,255,255,.08);
+    --text: #e8eef8; --dim: #7d8ca6; --acc: #5b8cff;
+    --c-episode: #5b8cff; --c-fact: #2fdca6; --c-preference: #ffa14a;
+    --c-relation: #ff6b8a; --c-skill: #b06bff; --c-digest: #ffd45e; --c-hypothesis: #8b9ab3;
+    --c-entity: #7ee8ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+    font: 13px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+  #cv { position: fixed; inset: 0; display: block; }
+
+  .topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    display: flex; align-items: center; gap: 14px; padding: 12px 20px;
+    background: linear-gradient(180deg, rgba(5,7,13,.92), rgba(5,7,13,0));
+    pointer-events: none;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; }
+  .pulse { width: 9px; height: 9px; border-radius: 50%; background: #2fdca6; box-shadow: 0 0 12px #2fdca6;
+    animation: beat 1.6s ease-in-out infinite; }
+  @keyframes beat { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.35);opacity:.7} }
+  .brand small { color: var(--dim); font-weight: 400; font-size: 11px; letter-spacing: .5px; }
+
+  .kpis { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+  .kpi {
+    padding: 6px 13px; border-radius: 999px; font-size: 12px; font-variant-numeric: tabular-nums;
+    background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(8px);
+  }
+  .kpi b { color: var(--acc); font-weight: 650; }
+
+  .side {
+    position: fixed; top: 64px; right: 16px; bottom: 16px; width: 320px; z-index: 9;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    backdrop-filter: blur(10px); display: flex; flex-direction: column; overflow: hidden;
+  }
+  .side h3 { margin: 0; padding: 14px 16px 8px; font-size: 13px; color: var(--dim);
+    letter-spacing: 1px; font-weight: 600; }
+  #detail { padding: 0 16px 14px; overflow-y: auto; flex: 1; }
+  #detail .empty { color: var(--dim); font-size: 12px; padding: 8px 0; }
+  #detail .card { border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; margin-bottom: 8px;
+    background: rgba(255,255,255,.03); font-size: 12px; }
+  #detail .card b { color: var(--acc); font-size: 12px; }
+  #detail .card .meta { color: var(--dim); font-size: 10.5px; margin-top: 3px; }
+  .legend { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 16px; border-top: 1px solid var(--line); }
+  .lg { font-size: 10.5px; color: var(--dim); display: flex; align-items: center; gap: 4px; }
+  .lg i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+  .toolbar { position: fixed; left: 16px; bottom: 16px; z-index: 9; display: flex; gap: 8px; }
+  button {
+    cursor: pointer; font: inherit; font-size: 12px; color: var(--text);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 7px 14px;
+    backdrop-filter: blur(8px); transition: .15s;
+  }
+  button:hover { border-color: var(--acc); }
+  .hint { position: fixed; left: 20px; top: 60px; color: var(--dim); font-size: 11px; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div class="topbar">
+  <div class="brand"><span class="pulse"></span>大肥鱼大脑 <small>· 一直在运行 · dafenyu-memory</small></div>
+  <div class="kpis" id="kpis"></div>
+</div>
+
+<div class="hint">拖拽节点 · 滚轮缩放 · 点节点看记忆</div>
+
+<div class="side">
+  <h3>节点详情</h3>
+  <div id="detail"><div class="empty">点一个节点看看她记得什么</div></div>
+  <div class="legend" id="legend"></div>
+</div>
+
+<div class="toolbar">
+  <button onclick="reload()">↻ 刷新</button>
+  <button onclick="runNightly()">🌙 夜巡</button>
+  <button onclick="reheat()">🔥 加热布局</button>
+</div>
+
+<script>
+const KIND_COLOR = {
+  episode: '#5b8cff', fact: '#2fdca6', preference: '#ffa14a', relation: '#ff6b8a',
+  skill: '#b06bff', digest: '#ffd45e', hypothesis: '#8b9ab3',
+};
+const KIND_NAME = { episode: '事件', fact: '事实', preference: '偏好', relation: '关系', skill: '技能', digest: '元记忆', hypothesis: '猜想' };
+const ET_COLOR = '#7ee8ff';
+
+let nodes = [], edges = [], W = 0, H = 0, scale = 1, offX = 0, offY = 0;
+let dragging = null, panning = false, panStart = null, alpha = 1;
+let selected = null;
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+
+function resize() {
+  W = cv.width = innerWidth * devicePixelRatio;
+  H = cv.height = innerHeight * devicePixelRatio;
+  cv.style.width = innerWidth + 'px'; cv.style.height = innerHeight + 'px';
+}
+addEventListener('resize', resize); resize();
+
+function reload() {
+  fetch('/brain').then(r => r.json()).then(({ status, data }) => {
+    if (status !== 'ok') return;
+    const { nodes: n, edges: e, stats } = data;
+    const old = new Map(nodes.map(x => [x.id, x]));
+    const R = Math.min(innerWidth, innerHeight) * 0.36;
+    nodes = n.map((x, i) => {
+      const ang = (i / Math.max(1, n.length)) * Math.PI * 2;
+      const prev = old.get(x.id);
+      return {
+        ...x, r: x.type === 'entity' ? 5 + Math.min(14, Math.sqrt(x.weight) * 3.2) : 3.5 + Math.min(6, x.weight),
+        x: prev ? prev.x : Math.cos(ang) * R * (0.4 + Math.random() * 0.6),
+        y: prev ? prev.y : Math.sin(ang) * R * (0.4 + Math.random() * 0.6),
+        vx: 0, vy: 0,
+      };
+    });
+    const ids = new Set(nodes.map(x => x.id));
+    edges = e.filter(x => ids.has(x.s) && ids.has(x.t)).map(x => ({ ...x }));
+    alpha = 1;
+    renderKpis(stats);
+    if (!selected) document.getElementById('detail').innerHTML = '<div class="empty">点一个节点看看她记得什么</div>';
+  }).catch(err => {
+    document.getElementById('kpis').innerHTML = '<span class="kpi">服务未启动</span>';
+  });
+}
+
+function renderKpis(st) {
+  document.getElementById('kpis').innerHTML =
+    `<span class="kpi">记忆 <b>${st.active}</b></span>` +
+    `<span class="kpi">实体 <b>${st.entities}</b></span>` +
+    `<span class="kpi">关系 <b>${st.relations}</b></span>` +
+    `<span class="kpi">被想起 <b>${st.hits}</b></span>` +
+    `<span class="kpi">已遗忘 <b>${st.forgotten}</b></span>`;
+  const lg = document.getElementById('legend');
+  lg.innerHTML = Object.entries(KIND_NAME).map(([k, v]) =>
+    `<span class="lg"><i style="background:${KIND_COLOR[k]}"></i>${v}</span>`).join('') +
+    `<span class="lg"><i style="background:${ET_COLOR}"></i>实体</span>`;
+}
+
+function physics() {
+  if (alpha < 0.005) return;
+  const rep = 2200 / (scale || 1);
+  for (let i = 0; i < nodes.length; i++) {
+    const a = nodes[i];
+    for (let j = i + 1; j < nodes.length; j++) {
+      const b = nodes[j];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      let d2 = dx * dx + dy * dy;
+      if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
+      if (d2 > 360000) continue;
+      const d = Math.sqrt(d2);
+      const f = rep / d2;
+      const fx = dx / d * f, fy = dy / d * f;
+      a.vx -= fx; a.vy -= fy; b.vx += fx; b.vy += fy;
+    }
+  }
+  const adj = new Map();
+  for (const e of edges) {
+    adj.set(e.s, (adj.get(e.s) || 0) + 1);
+    adj.set(e.t, (adj.get(e.t) || 0) + 1);
+  }
+  const springK = 0.006, restLen = 86;
+  for (const e of edges) {
+    const a = nodes.find(x => x.id === e.s), b = nodes.find(x => x.id === e.t);
+    if (!a || !b) continue;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const deg = (adj.get(e.s) || 1) + (adj.get(e.t) || 1);
+    const k = springK / Math.sqrt(deg);
+    const f = (d - restLen) * k;
+    const fx = dx / d * f, fy = dy / d * f;
+    a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;
+  }
+  const cx = 0, cy = 0;
+  for (const n of nodes) {
+    n.vx += (cx - n.x) * 0.0018; n.vy += (cy - n.y) * 0.0018;
+    if (dragging === n) { n.vx = 0; n.vy = 0; continue; }
+    n.x += n.vx * alpha; n.y += n.vy * alpha;
+    n.vx *= 0.86; n.vy *= 0.86;
+  }
+  alpha *= 0.997;
+}
+
+function draw() {
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  ctx.clearRect(0, 0, innerWidth, innerHeight);
+  ctx.save();
+  ctx.translate(innerWidth / 2 + offX, innerHeight / 2 + offY);
+  ctx.scale(scale, scale);
+
+  for (const e of edges) {
+    const a = nodes.find(x => x.id === e.s), b = nodes.find(x => x.id === e.t);
+    if (!a || !b) continue;
+    ctx.strokeStyle = e.label ? 'rgba(255,212,94,.28)' : 'rgba(255,255,255,.09)';
+    ctx.lineWidth = e.label ? 1.4 : 0.7;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+
+  for (const n of nodes) {
+    let color = ET_COLOR;
+    if (n.type === 'memory') color = KIND_COLOR[n.kind] || '#8b9ab3';
+    const sel = selected && (selected.id === n.id || (selected.id.startsWith('e:') && n.id === selected.id));
+    /* 光晕 */
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.r + (n.type === 'entity' ? 6 : 4), 0, 7);
+    ctx.fillStyle = color + (n.pin ? '55' : '22');
+    ctx.fill();
+    /* 本体 */
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.r, 0, 7);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = n.type === 'memory' ? 0.88 : 1;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    if (n.pin) {
+      ctx.strokeStyle = '#ffd45e'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 3.5, 0, 7); ctx.stroke();
+    }
+    if (sel || (n.type === 'entity' && n.r > 8) || scale > 1.7) {
+      ctx.font = `${n.type === 'entity' ? 11 : 10}px "Segoe UI", sans-serif`;
+      ctx.fillStyle = sel ? '#fff' : 'rgba(230,238,248,.72)';
+      ctx.textAlign = 'center';
+      ctx.fillText(n.label, n.x, n.y - n.r - 5);
+    }
+  }
+  ctx.restore();
+}
+
+function loop() {
+  physics();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function pick(mx, my) {
+  const x = (mx - innerWidth / 2 - offX) / scale, y = (my - innerHeight / 2 - offY) / scale;
+  return nodes.find(n => (n.x - x) ** 2 + (n.y - y) ** 2 <= (n.r + 6) ** 2) || null;
+}
+
+cv.addEventListener('pointerdown', (e) => {
+  const n = pick(e.clientX, e.clientY);
+  if (n) { dragging = n; n._px = e.clientX; n._py = e.clientY; }
+  else { panning = true; panStart = { x: e.clientX, y: e.clientY, ox: offX, oy: offY }; }
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove', (e) => {
+  if (dragging) {
+    dragging.x += (e.clientX - dragging._px) / scale;
+    dragging.y += (e.clientY - dragging._py) / scale;
+    dragging._px = e.clientX; dragging._py = e.clientY;
+    alpha = Math.max(alpha, 0.25);
+  } else if (panning) {
+    offX = panStart.ox + (e.clientX - panStart.x);
+    offY = panStart.oy + (e.clientY - panStart.y);
+  }
+});
+cv.addEventListener('pointerup', () => { dragging = null; panning = false; });
+cv.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  scale = Math.min(4, Math.max(0.25, scale * (e.deltaY < 0 ? 1.1 : 0.9)));
+}, { passive: false });
+cv.addEventListener('click', (e) => {
+  const n = pick(e.clientX, e.clientY);
+  selected = n;
+  const box = document.getElementById('detail');
+  if (!n) { box.innerHTML = '<div class="empty">点一个节点看看她记得什么</div>'; return; }
+  if (n.type === 'entity') {
+    const linked = edges.filter(x => x.t === n.id || x.s === n.id).length;
+    box.innerHTML = `<div class="card"><b>🏷 ${n.label}</b>
+      <div class="meta">实体（${n.etype || 'thing'}）· 被提及 ${n.weight} 次 · 关联记忆 ${linked} 条</div></div>` +
+      nodes.filter(x => x.type === 'memory' && edges.some(y => (y.s === x.id && y.t === n.id)))
+        .slice(0, 12).map(x => `<div class="card">${x.label}…
+        <div class="meta">${KIND_NAME[x.kind] || x.kind}${x.pin ? ' · 📌 钉住' : ''}</div></div>`).join('');
+  } else {
+    fetch('/recall', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: n.label, k: 1, minScore: -1 }) })
+      .then(r => r.json()).then(({ data }) => {
+        const hit = data.hits[0];
+        box.innerHTML = `<div class="card"><b>${KIND_NAME[n.kind] || n.kind}${n.pin ? ' · 📌' : ''}</b><br>
+          ${hit ? hit.text : n.label}
+          <div class="meta">相关度 ${hit ? hit.score : '-'} · 属于 ${hit ? hit.owner : '-'}</div></div>`;
+      });
+  }
+});
+
+function runNightly() {
+  fetch('/nightly', { method: 'POST' }).then(r => r.json()).then(({ data }) => {
+    alert(`夜巡完成：衰减 ${data.decayed} · 归档 ${data.archived} · 合并 ${data.merged} · 清除 ${data.purged}\n剩余活跃 ${data.active} 条`);
+    reload();
+  });
+}
+function reheat() { alpha = 1; }
+
+reload();
+setInterval(reload, 30000);   // 每 30 秒刷新一次"大脑状态"
+loop();
+</script>
+</body>
+</html>
