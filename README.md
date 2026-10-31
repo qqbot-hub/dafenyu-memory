@@ -11,6 +11,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![Deps](https://img.shields.io/badge/依赖-0-brightgreen)](#快速开始)
 [![Tests](https://img.shields.io/badge/自测-14%20通过-9cf)](scripts/test.mjs)
+[![M8ven Verified](https://m8ven.ai/badge/mcp/qqbot-hub-dafenyu-memory-1rrmes?v=27ccc599f2a310ff1ef41fe4ff037c79&variant=verified)](https://m8ven.ai/mcp/qqbot-hub-dafenyu-memory-1rrmes?s=readme)
 
 ---
 
